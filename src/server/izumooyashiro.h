@@ -22,10 +22,7 @@
 #ifndef __IZUMOOYASHIRO_H__
 #define __IZUMOOYASHIRO_H__
 
-
-int izm_open_inet_socket();
-int izm_accept();
-int izm_webSock_RcvSnd();
+int izm_webSock_RcvSnd(int acptfd);
 
 
 #endif /* __IZUMOOYASHIRO_H__ */

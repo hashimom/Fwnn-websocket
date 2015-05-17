@@ -20,8 +20,23 @@
 */
 #include <stdio.h>
 #include <stdlib.h>
-/* #include <sys/socket.h> */
+#include <string.h>
+#include <netdb.h>
+#include <syslog.h>
 #include "izumooyashiro.h"
+
+/* 仮（config.hを作成するまで） */
+#define IR_SERVICE_NAME "izumo-fwnn"
+#define IR_DEFAULT_PORT 8860
+
+enum {
+	SOCK_OTHER_ERROR = -2,
+	SOCK_BIND_ERROR,
+	SOCK_OK, /* This is '0'. (dummy) */
+};
+
+static int inetSockfd = -1;
+static int acptSockfd = -1;
 
 /* char gDbgMode = 0; */
 /* 後で直す */
@@ -48,9 +63,67 @@ static int izm_daemon()
 	return(getpid());
 }
 
+static int izm_open_inet_socket()
+{
+	struct sockaddr_in insock;
+	struct servent *sp;
+	int retry = 0, oldflags;
+	int status = SOCK_OTHER_ERROR;
+
+	inetSockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (inetSockfd >= 0) {
+
+#ifdef SO_REUSEADDR
+		int one = 1;
+		setsockopt(inetSockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(int));
+#endif
+		bzero((char *)&insock, sizeof(insock));
+		insock.sin_family = AF_INET;
+		insock.sin_addr.s_addr = INADDR_ANY;
+
+		/* ポート番号を取得 */
+		sp = getservbyname(IR_SERVICE_NAME ,"tcp");
+		if (sp != NULL)
+			insock.sin_port = sp->s_port;
+		else
+			insock.sin_port = htons(IR_DEFAULT_PORT);
+
+		if (bind(inetSockfd, (struct sockaddr *)&insock, sizeof(insock)) < 0) {
+			status = SOCK_BIND_ERROR;
+			close(inetSockfd);
+			goto last;
+		}
+
+		if (listen (inetSockfd, 5) < 0) {
+			close(inetSockfd);
+			goto last;
+		}
+
+		/* いずれはfdではなくセッションIDを返すようにする*/
+		status = inetSockfd;
+	}
+
+last:
+	return(status);
+}
+
+static int izm_accept()
+{
+	int clilen;
+	struct sockaddr_in client;
+
+	clilen = sizeof(client);
+	acptSockfd = accept(inetSockfd, (struct sockaddr *)&client, &clilen);
+	if (acptSockfd < 0)
+		perror("accept");
+
+	return(acptSockfd);
+}
+
 int main(int argc, char *argv[])
 {
-	int optno, status;
+	int optno, status, con;
+	int acptfd;
 
 	while ((optno = getopt(argc, argv, "d") != -1)) {
 		switch (optno) {
@@ -70,11 +143,15 @@ int main(int argc, char *argv[])
 	status = izm_open_inet_socket();
 
 	/* accept処理はマルチスレッド対応時に何とかしたい */
-	if (status >= 0)
-		izm_accept();
-
 	while (status >= 0) {
-		status = izm_webSock_RcvSnd();
+		con = -1;
+		acptfd = izm_accept();
+		if (acptfd >= 0)
+			con = 0;
+
+		while (con == 0) {
+			con = izm_webSock_RcvSnd(acptfd);
+		}
 	}
 
 	printf("Goodbye, kasuga.\n");

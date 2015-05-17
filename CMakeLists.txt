@@ -12,7 +12,5 @@ INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR}/include)
 INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR}/src/include)
 
 add_subdirectory(src/server)
-add_subdirectory(src/lib/cwebsocket)
-
-
-
+add_subdirectory(src/lib/manyowebsock)
+add_subdirectory(src/lib/easyfwnn)

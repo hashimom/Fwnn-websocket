@@ -18,100 +18,24 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <syslog.h>
-/* #include <sys/socket.h> */
 #include "websocket.h"
 #include "izumooyashiro.h"
 
-enum {
-	SOCK_OTHER_ERROR = -2,
-	SOCK_BIND_ERROR,
-	SOCK_OK, /* This is '0'. (dummy) */
-};
-
 #define BUF_LEN 0xFFFF
 
-
-
-static int inetSockfd = -1;
-static int acptSockfd = -1;
 static enum wsState wsstate = WS_STATE_OPENING;
 static struct handshake hs;
 
-
-/* 仮（config.hを作成するまで） */
-#define IR_SERVICE_NAME "izumo-fwnn"
-#define IR_DEFAULT_PORT 8860
-
-int izm_open_inet_socket()
+int izm_webSock_RcvSnd(int acptfd)
 {
-	struct sockaddr_in insock;
-	struct servent *sp;
-	int retry = 0, oldflags;
-	int status = SOCK_OTHER_ERROR;
-
-	inetSockfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (inetSockfd  < 0) {
-		/* error */
-	}
-	else {
-
-#ifdef SO_REUSEADDR
-		int one = 1;
-		setsockopt(inetSockfd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(int));
-#endif
-		bzero((char *)&insock, sizeof(insock));
-		insock.sin_family = AF_INET;
-		insock.sin_addr.s_addr = htonl(INADDR_ANY);
-
-		/* ポート番号を取得 */
-		sp = getservbyname(IR_SERVICE_NAME ,"tcp");
-		if (sp != NULL)
-			insock.sin_port = sp->s_port;
-		else
-			insock.sin_port = htons(IR_DEFAULT_PORT);
-
-		if (bind(inetSockfd, (struct sockaddr *)&insock, sizeof(insock)) < 0) {
-			status = SOCK_BIND_ERROR;
-			close(inetSockfd);
-			goto last;
-		}
-
-		if (listen (inetSockfd, 5) < 0) {
-			close(inetSockfd);
-			goto last;
-		}
-
-		/* いずれはfdではなくセッションIDを返すようにする*/
-		status = inetSockfd;
-	}
-
-last:
-	return(status);
-}
-
-int izm_accept()
-{
-	int clilen;
-	struct sockaddr_in client;
-
-	clilen = sizeof(client);
-	acptSockfd = accept(inetSockfd, (struct sockaddr *)&client, &clilen);
-	if (acptSockfd < 0) {
-		perror("accept");
-		return(-1);
-	}
-	return(0);
-}
-
-
-int izm_webSock_RcvSnd()
-{
+	int ret = 0;
 	uint8_t gBuffer[BUF_LEN];
 	uint8_t rcvdata[BUF_LEN];
 	uint8_t *indata = NULL;
@@ -126,15 +50,27 @@ int izm_webSock_RcvSnd()
 	memset(rcvdata, 0, BUF_LEN);
 
 	/* receive & parse */
-	rcvlen = recv(acptSockfd, rcvdata, BUF_LEN, 0);
-	if (wsstate == WS_STATE_OPENING) {
-		printf("Izumo Websock Handshake phase.\n");
-		frameType = wsParseHandshake(rcvdata, rcvlen, &hs);
-		indataSize = rcvlen;
+	rcvlen = recv(acptfd, rcvdata, BUF_LEN, 0);
+	if (rcvlen > 0) {
+		if (wsstate == WS_STATE_OPENING) {
+			printf("Izumo Websock Handshake phase.\n");
+			frameType = wsParseHandshake(rcvdata, rcvlen, &hs);
+			indataSize = rcvlen;
+		}
+		else {
+			frameType = wsParseInputFrame(rcvdata, rcvlen, &indata, &indataSize);
+		}
 	}
 	else {
-		frameType = wsParseInputFrame(rcvdata, rcvlen, &indata, &indataSize);
-    }
+		ret = -1;
+		if (rcvlen == 0) {
+			/* graceful close, if rcvlen is 0. */
+			ret = 1;
+			wsstate = WS_STATE_OPENING; /* 暫定 */
+		}
+		close(acptfd);
+		return(ret);
+	}
 
 	/* Error */
 	if ((frameType == WS_INCOMPLETE_FRAME && indataSize >= BUF_LEN) || frameType == WS_ERROR_FRAME) {
@@ -151,12 +87,12 @@ int izm_webSock_RcvSnd()
 					"%s%s\r\n\r\n",
 					versionField,
 					version);
-			send(acptSockfd, gBuffer, frameSize, 0);
+			send(acptfd, gBuffer, frameSize, 0);
 			return(0);
 		}
 		else {
 			wsMakeFrame(NULL, 0, gBuffer, &frameSize, WS_CLOSING_FRAME);
-			if (send(acptSockfd, gBuffer, frameSize, 0) < 0)
+			if (send(acptfd, gBuffer, frameSize, 0) < 0)
 				return(0);
 			wsstate = WS_STATE_CLOSING;
         }
@@ -177,16 +113,18 @@ int izm_webSock_RcvSnd()
 				return(-1);
 			}
 #endif
+			/* izumo open ※本来ならオープン処理の戻りを確認してリターンすべきだがとりあえず暫定 */
+			fwnnserver_open();
+
 			frameSize = BUF_LEN;
 			memset(gBuffer, 0, BUF_LEN);
 			wsGetHandshakeAnswer(&hs, gBuffer, &frameSize);
 			freeHandshake(&hs);
-			if (send(acptSockfd, gBuffer, frameSize, 0) < 0)
-				return(0);
+			if (send(acptfd, gBuffer, frameSize, 0) < 0) {
+				fwnnserver_close();
+				return(-1);
+			}
 			wsstate = WS_STATE_NORMAL;
-
-			/* izumo open */
-
 		}
 	}
 	else {
@@ -195,28 +133,29 @@ int izm_webSock_RcvSnd()
 				return(0);
 			}
 			else {
+				/* izumo close */
+				fwnnserver_close();
+
 				frameSize = BUF_LEN;
 				memset(gBuffer, 0, BUF_LEN);
 				wsMakeFrame(NULL, 0, gBuffer, &frameSize, WS_CLOSING_FRAME);
-				send(acptSockfd, gBuffer, frameSize, 0);
+				send(acptfd, gBuffer, frameSize, 0);
 				return(0);
 			}
 		}
 		/* WS_TEXT_FRAME　通信 */
 		else if (frameType == WS_TEXT_FRAME) {
-			/* この辺りに変換処理を追加する */
-			uint8_t *recievedString = NULL;
-			recievedString = malloc(indataSize+1);
-			if (recievedString != NULL) {
-				memcpy(recievedString, indata, indataSize);
-				recievedString[indataSize] = 0;
-
+			uint8_t *convString = NULL;
+			convString = malloc(indataSize+1);
+			if (convString != NULL) {
+				int convSize = fwnnserver_kanren(indata, convString);
 				frameSize = BUF_LEN;
 				memset(gBuffer, 0, BUF_LEN);
-				wsMakeFrame(recievedString, indataSize, gBuffer, &frameSize, WS_TEXT_FRAME);
-				free(recievedString);
-				send(acptSockfd, gBuffer, frameSize, 0);
+				wsMakeFrame(convString, convSize, gBuffer, &frameSize, WS_TEXT_FRAME);
+				free(convString);
+				send(acptfd, gBuffer, frameSize, 0);
 			}
+
         }
     }
 
