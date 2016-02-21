@@ -5,6 +5,7 @@
 int fwnnserver_open();
 int fwnnserver_close();
 int fwnnserver_adddic(char *dicfilename);
-int fwnnserver_kanren(uint8_t *yomi, uint8_t *kanren);
+// int fwnnserver_kanren(uint8_t *yomi, uint8_t *kanren);
+uint8_t *fwnnserver_kanren(uint8_t *yomi);
 
 #endif
