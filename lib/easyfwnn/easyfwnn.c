@@ -47,7 +47,7 @@ static WNN_ENV *wnnenv;
 static struct wnn_ret_buf wnnbuf= {0, NULL};
 
 /* もちろん仮。malloc して返すように変更する予定 */
-static unsigned char wnn_out_kanstr[MAX_CONV_STRLEN];
+static uint8_t wnn_out_kanstr[MAX_CONV_STRLEN];
 
 static void set_wnn_env_pram()
 {

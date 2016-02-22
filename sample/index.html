@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ws-wnn client</title>
+    <title>ws-wnn</title>
     <link href="http://netdna.bootstrapcdn.com/twitter-bootstrap/2.3.1/css/bootstrap-combined.min.css" rel="stylesheet">
     <script src="http://code.jquery.com/jquery.js"></script>
 </head>
 <body>
     <div class="container">
-        <h1 class="page-header">ws-wnnclient</h1>
+        <h1 class="page-header">FreeWnnとWebSocketで遊んでみよう！</h1>
 
         <form action="" class="form-inline" id="connectForm">
             <div class="input-append">
@@ -16,18 +16,21 @@
                 <button class="btn" disabled="disabled" id="disconnect">Disconnect</button>
             </div>
         </form>
+        
         <form action="" id="sendForm">
-            <div class="input-append">
-                <input class="input-large" type="text" placeholder="message" id="message" disabled="disabled">
-                <button class="btn btn-primary" type="submit" id="send" disabled="disabled">send</button>
-            </div>
+            <input class="input-large" type="text" style="width:95%; padding:10px" autocomplete="off" placeholder="message" id="message" disabled="disabled">
         </form>
+
+        <div id="conv_kanj" style="font-size:x-large;"></div>
+        
         <hr>
         <ul class="unstyled" id="log"></ul>
     </div>
     <script type="text/javascript">
+    
         $(document).ready(function() {
             var ws;
+            
 
             $('#connectForm').on('submit', function() {
                 if ("WebSocket" in window) {
@@ -47,6 +50,7 @@
 
                     ws.onmessage = function(event) {
                         $('#log').append('<li>recieved: <span class="badge">' + event.data + '</span></li>');
+                        $("#conv_kanj").text(event.data);
                     };
 
                     ws.onclose = function() {
@@ -57,18 +61,23 @@
                         $('#message').attr('disabled', 'disabled');
                         $('#send').attr('disabled', 'disabled');
                     };
+                    
                 } else {
                     $('#log').append('<li><span class="badge badge-important">WebSocket NOT supported in this browser</span></li>');
                 }
 
                 return false;
             });
-            $('#sendForm').on('submit', function() {
-                var message = $('#message').val();
-                ws.send(message);
-                $('#log').append('<li>sended: <span class="badge">' + message + '</span></li>');
+            $('#sendForm').on('keyup', function() {
+               var message = $('#message').val();
+               if (message.length != 0) {
+                    ws.send(message);
+                    $('#log').append('<li>sended: <span class="badge">' + message + '</span></li>');
+               } else {
+                    $("#conv_kanj").text("");
+               }
 
-                return false;
+               return false;
             });
             $('#disconnect').on('click', function() {
                 ws.close();
@@ -76,6 +85,7 @@
                 return false;
             });
         });
+        
     </script>
 </body>
 </html>
